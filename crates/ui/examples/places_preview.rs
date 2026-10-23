@@ -17,8 +17,11 @@ use egui::{Align2, Color32, CornerRadius, FontId, Painter, Rect, Stroke, UiBuild
 const ACCENT: Color32 = Color32::from_rgb(0x3B, 0x5B, 0xDB);
 const LABELS: PlacesLabels<'static> = PlacesLabels { places: "Places", add_place: "Add a place", browse: "Browse…", loading: "Loading…" };
 
-const LOCAL: &[Place<'static>] =
-    &[Place { kind: PlaceKind::Recent, label: "Recent", detail: None }, Place { kind: PlaceKind::Local, label: "This computer", detail: None }];
+const LOCAL: &[Place<'static>] = &[
+    Place { kind: PlaceKind::Recent, label: "Recent", detail: None },
+    Place { kind: PlaceKind::Synced, label: "OneDrive", detail: Some("Contoso") },
+    Place { kind: PlaceKind::Local, label: "This computer", detail: None },
+];
 const WITH_ACCOUNTS: &[Place<'static>] = &[
     Place { kind: PlaceKind::Recent, label: "Recent", detail: None },
     Place { kind: PlaceKind::Account, label: "Work", detail: Some("you@company.example") },

@@ -69,12 +69,14 @@ pub struct LocalFolder {
     items: Vec<LocalItem>,
     truncated: bool,
     failed: Option<ErrorKind>,
+    /// Where the place starts, when it is not the whole disk.
+    root: Option<PathBuf>,
 }
 
 impl LocalFolder {
     /// Reads `dir`, once. `extensions` are the kinds of file to list, without the dot and in any
-    /// case; `*` lists every file. Subfolders are always listed. Hidden entries (a leading dot)
-    /// are left out.
+    /// case; `*` lists every file. Subfolders are always listed. Hidden entries (a leading dot, or
+    /// Windows' hidden attribute) are left out.
     pub fn open(dir: impl Into<PathBuf>, extensions: &[&str]) -> Self {
         let mut folder = Self {
             dir: dir.into(),
@@ -82,8 +84,18 @@ impl LocalFolder {
             items: Vec::new(),
             truncated: false,
             failed: None,
+            root: None,
         };
         folder.read(MAX_LISTED);
+        folder
+    }
+
+    /// Reads `root`, once, as the top of a place of its own, such as a synced cloud folder: the
+    /// breadcrumb starts there, and its first step leads back there instead of to the home folder.
+    pub fn rooted(root: impl Into<PathBuf>, extensions: &[&str]) -> Self {
+        let root = root.into();
+        let mut folder = Self::open(root.clone(), extensions);
+        folder.root = Some(root);
         folder
     }
 
@@ -136,7 +148,7 @@ impl LocalFolder {
             // An entry that cannot be read is skipped; the rest of the folder still lists.
             let Ok(entry) = entry else { continue };
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            if name.starts_with('.') || hidden(&entry) {
                 continue;
             }
             let path = entry.path();
@@ -164,7 +176,8 @@ impl LocalFolder {
     }
 
     /// The way back up, for [`PlacesPanel::crumbs`]: `root` (the place's own name, which leads to
-    /// the home folder), then each folder of the path.
+    /// where the place starts: its root, or the home folder), then each folder of the path below
+    /// it.
     ///
     /// [`PlacesPanel::crumbs`]: super::PlacesPanel::crumbs
     pub fn crumbs(&self, root: &str) -> Vec<String> {
@@ -173,9 +186,13 @@ impl LocalFolder {
 
     /// Each named folder of the path with where it is.
     fn steps(&self) -> Vec<(String, PathBuf)> {
-        let mut at = PathBuf::new();
+        // Below the root when the listing is inside it; a folder outside it shows its whole path.
+        let (mut at, below) = match self.root.as_deref().and_then(|root| Some((root, self.dir.strip_prefix(root).ok()?))) {
+            Some((root, below)) => (root.to_path_buf(), below),
+            None => (PathBuf::new(), self.dir.as_path()),
+        };
         let mut steps = Vec::new();
-        for part in self.dir.components() {
+        for part in below.components() {
             at.push(part);
             if let std::path::Component::Normal(name) = part {
                 steps.push((name.to_string_lossy().into_owned(), at.clone()));
@@ -219,8 +236,8 @@ impl LocalFolder {
             },
             // The first crumb is the place itself: back to where it starts.
             PlacesAction::Crumb(0) => {
-                if let Some(home) = Self::home() {
-                    self.go(home);
+                if let Some(start) = self.root.clone().or_else(Self::home) {
+                    self.go(start);
                 }
                 LocalOutcome::Stay
             }
@@ -234,6 +251,20 @@ impl LocalFolder {
             PlacesAction::Select(_) | PlacesAction::AddPlace => LocalOutcome::Stay,
         }
     }
+}
+
+/// Windows hides an entry with an attribute instead of a leading dot: the recycle bin at the top
+/// of a drive, `desktop.ini` in a folder with its own icon.
+#[cfg(windows)]
+fn hidden(entry: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    entry.metadata().is_ok_and(|meta| meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+}
+
+#[cfg(not(windows))]
+fn hidden(_: &std::fs::DirEntry) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -339,6 +370,21 @@ mod tests {
         let odd = LocalFolder::open(dir.join("Budget.docx"), &["docx"]);
         assert!(odd.failed().is_some());
         assert_eq!(title(&odd).1, None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// What Windows marks hidden is left out, as a leading dot is elsewhere.
+    #[cfg(windows)]
+    #[test]
+    fn an_entry_windows_marks_hidden_is_left_out() {
+        let dir = scratch("hidden");
+        std::fs::create_dir_all(dir.join("$RECYCLE.BIN")).unwrap();
+        std::fs::write(dir.join("desktop.ini"), b"").unwrap();
+        for name in ["$RECYCLE.BIN", "desktop.ini"] {
+            let status = std::process::Command::new("attrib").arg("+h").arg(dir.join(name)).status().unwrap();
+            assert!(status.success());
+        }
+        assert_eq!(names(&LocalFolder::open(&dir, &["*"])), ["archive", "Proposals", "Budget.docx", "notes.DOCX", "picture.png"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 

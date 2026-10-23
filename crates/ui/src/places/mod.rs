@@ -1,6 +1,6 @@
 //! The places panel: where a Craft app opens a document from and saves it to. Places on the left
-//! (Recent, one per connected account, This computer), the chosen place's files and folders on the
-//! right, as a list or as thumbnails.
+//! (Recent, one per connected account, the synced cloud folders, This computer), the chosen place's
+//! files and folders on the right, as a list or as thumbnails.
 //!
 //! One panel serves three hosts: the File › Open and Save As pages of the Office-style apps, the
 //! home screen of the graphics apps (which put their New and Open buttons in [`PlacesPanel::header`])
@@ -12,6 +12,7 @@
 //! storage passes no account places and leaves [`PlacesPanel::add_place`] off; nothing else changes.
 
 pub mod local;
+pub mod synced;
 
 use egui::text::{LayoutJob, TextWrapping};
 use egui::{
@@ -75,6 +76,8 @@ pub enum PlaceKind {
     Recent,
     /// Remote storage reached through a signed-in account.
     Account,
+    /// A folder a cloud service's own app keeps in step on this computer (see [`synced`]).
+    Synced,
     /// This computer.
     Local,
     /// Anything else the application lists, such as a pinned folder.
@@ -152,6 +155,8 @@ pub struct PlacesLabels<'a> {
 pub enum PlacesIcon {
     Recent,
     Account,
+    /// A folder with a cloud on it: a synced folder, on this computer and in the cloud.
+    Synced,
     Local,
     Other,
     Add,
@@ -436,6 +441,7 @@ fn place_row(ui: &mut Ui, s: &PlacesStyle, icon: IconPainter<'_>, place: &Place<
     let which = match place.kind {
         PlaceKind::Recent => PlacesIcon::Recent,
         PlaceKind::Account => PlacesIcon::Account,
+        PlaceKind::Synced => PlacesIcon::Synced,
         PlaceKind::Local => PlacesIcon::Local,
         PlaceKind::Other => PlacesIcon::Other,
     };
@@ -653,15 +659,11 @@ pub fn paint_icon(icon: PlacesIcon, painter: &Painter, rect: Rect, colour: Color
             painter.add(line(&[(0.5, 0.26), (0.5, 0.52), (0.67, 0.62)]));
         }
         PlacesIcon::Account => {
-            // A cloud: three arcs over a flat base.
-            let mut points = Vec::with_capacity(40);
-            for (cx, cy, r, from, to) in [(0.29, 0.61, 0.21, 90.0, 245.0), (0.48, 0.43, 0.25, 195.0, 335.0), (0.73, 0.62, 0.2, 285.0, 450.0)] {
-                for step in 0..=12 {
-                    let angle = (from + (to - from) * step as f32 / 12.0_f32).to_radians();
-                    points.push(at(cx + r * angle.cos(), cy + r * angle.sin()));
-                }
-            }
-            painter.add(Shape::closed_line(points, stroke));
+            painter.add(Shape::closed_line(cloud(&at, (0.5, 0.5), 1.0), stroke));
+        }
+        PlacesIcon::Synced => {
+            painter.add(outline(&[(0.1, 0.24), (0.4, 0.24), (0.5, 0.36), (0.9, 0.36), (0.9, 0.8), (0.1, 0.8)]));
+            painter.add(Shape::closed_line(cloud(&at, (0.5, 0.59), 0.58), stroke));
         }
         PlacesIcon::Local => {
             painter.rect_stroke(Rect::from_min_max(at(0.14, 0.2), at(0.86, 0.68)), CornerRadius::same(1), stroke, StrokeKind::Middle);
@@ -692,6 +694,19 @@ pub fn paint_icon(icon: PlacesIcon, painter: &Painter, rect: Rect, colour: Color
             painter.add(line(&[(0.36, 0.72), (0.66, 0.72)]));
         }
     }
+}
+
+/// A cloud, three arcs over a flat base, centred on `centre` at `scale` of the icon.
+fn cloud(at: &dyn Fn(f32, f32) -> Pos2, centre: (f32, f32), scale: f32) -> Vec<Pos2> {
+    let mut points = Vec::with_capacity(39);
+    for (cx, cy, r, from, to) in [(0.29, 0.61, 0.21, 90.0, 245.0), (0.48, 0.43, 0.25, 195.0, 335.0), (0.73, 0.62, 0.2, 285.0, 450.0)] {
+        for step in 0..=12 {
+            let angle = (from + (to - from) * step as f32 / 12.0_f32).to_radians();
+            let (x, y) = (cx + r * angle.cos(), cy + r * angle.sin());
+            points.push(at(centre.0 + (x - 0.5) * scale, centre.1 + (y - 0.5) * scale));
+        }
+    }
+    points
 }
 
 pub(crate) fn finite(value: f32, fallback: f32) -> f32 {

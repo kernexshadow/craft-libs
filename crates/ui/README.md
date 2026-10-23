@@ -281,8 +281,8 @@ fn column(ui: &mut egui::Ui, showing: &'static str, accent: egui::Color32, title
 ## Places panel
 
 `places::PlacesPanel` is where an app opens a document from and saves it to: places on the left
-(Recent, one per connected account, This computer), the chosen place's files and folders on the
-right. One panel serves three hosts: the File › Open and Save As pages of the Office-style apps,
+(Recent, one per connected account, the synced cloud folders, This computer), the chosen place's
+files and folders on the right. One panel serves three hosts: the File › Open and Save As pages of the Office-style apps,
 the home screen of the graphics apps, and, through `places::menu`, the "Open from" items of a
 classic File menu. Preview all of them with
 `cargo run -p craft-ui --example places_preview -- OUT_DIR` (set `CRAFT_PREVIEW_FONTS` to a folder
@@ -377,6 +377,43 @@ fn this_computer(ui: &mut egui::Ui, folder: &mut LocalFolder, places: &[Place<'_
   A build started from a terminal has no identity of its own, so the system answers for the
   terminal instead and may refuse without asking.
 - **The web** has no folders to list: offer no such place there.
+
+### Synced cloud folders
+
+`places::synced` finds the folders that a cloud service's own app keeps in step on this computer
+(OneDrive, Google Drive, iCloud Drive, Dropbox) and makes each a place of its own. There is no
+account, no network and no provider API: the service's app moves the files, and the panel lists
+the folder with `LocalFolder`, so it works offline.
+
+```rust
+use craft_ui::places::synced::{self, SyncedFolder};
+
+fn start(ctx: egui::Context, found: std::sync::Arc<std::sync::Mutex<Vec<SyncedFolder>>>) {
+    // It touches the disk, and a cloud drive still starting can keep it waiting: off the UI thread.
+    synced::find_in_background(move |folders| {
+        if let Ok(mut found) = found.lock() {
+            *found = folders;
+        }
+        ctx.request_repaint();
+    });
+}
+```
+
+- **Places.** `SyncedFolder::place()` is the row: the service's name (not translated) and, where
+  there are two of one service, the organisation, account or team under it. They go after the
+  accounts and before This computer.
+- **Listing.** `SyncedFolder::open(&["docx"])` is a `LocalFolder::rooted` at the synced folder: the
+  breadcrumb starts at the place, and its first step leads back to it, not to the home folder.
+- **Where it looks.** Windows: `%OneDriveConsumer%`, `%OneDriveCommercial%`, `%OneDrive%` and the
+  `OneDrive`/`OneDrive - <organisation>` folders in the home folder; `%USERPROFILE%\iCloudDrive`;
+  and, only when Google Drive for desktop is installed, the drive letter holding `My Drive` or a
+  mirrored `%USERPROFILE%\My Drive`. macOS: `~/Library/CloudStorage` (`OneDrive-*`,
+  `GoogleDrive-*`, `Dropbox`) and iCloud Drive's `~/Library/Mobile Documents/com~apple~CloudDocs`.
+  Everywhere: Dropbox's `info.json`, else `~/Dropbox`. Linux has no OneDrive, Google Drive or
+  iCloud app of the services' own, so only Dropbox is looked for there.
+- **Icons.** `PlacesIcon::Synced` is a folder with a cloud on it, drawn like the others: never a
+  service's logo.
+- **The web** finds nothing; `find_in_background` returns false where no thread can start.
 
 ## Compatibility and checks
 
