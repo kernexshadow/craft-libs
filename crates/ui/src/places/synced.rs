@@ -210,9 +210,9 @@ fn dropbox(machine: &Machine, found: &mut Vec<SyncedFolder>) {
         let Some(json) = read_small(&info) else { continue };
         for section in ["personal", "business"] {
             if let Some(dir) = json_string_at(&json, &[section, "path"]).map(PathBuf::from) {
-                told = true;
                 let detail = dir.file_name().and_then(|name| dropbox_detail(&name.to_string_lossy()));
-                push(found, Service::Dropbox, &dir, detail);
+                // A folder info.json names but that is gone does not count: ~/Dropbox may still be.
+                told |= push(found, Service::Dropbox, &dir, detail);
             }
         }
     }
@@ -221,11 +221,13 @@ fn dropbox(machine: &Machine, found: &mut Vec<SyncedFolder>) {
     }
 }
 
-/// Lists `dir` as a synced folder when it is a folder.
-fn push(found: &mut Vec<SyncedFolder>, service: Service, dir: &Path, detail: Option<String>) {
-    if dir.is_dir() {
+/// Lists `dir` as a synced folder when it is a folder; true when it was.
+fn push(found: &mut Vec<SyncedFolder>, service: Service, dir: &Path, detail: Option<String>) -> bool {
+    let listed = dir.is_dir();
+    if listed {
         found.push(SyncedFolder { service, root: dir.to_path_buf(), detail });
     }
+    listed
 }
 
 /// The organisation of a work OneDrive, from its folder's name: `OneDrive - Contoso` on Windows,
@@ -469,6 +471,9 @@ mod tests {
         std::fs::write(root.join(".dropbox/info.json"), format!(r#"{{"personal":{{"path":"{}"}}}}"#, json_path(&root.join("Elsewhere/Dropbox"))))
             .unwrap();
         assert_eq!(seen(&find_on(&machine(System::Other, &root)), &root), [(Service::Dropbox, "Elsewhere/Dropbox".to_owned(), None)]);
+        // A folder info.json names that is gone leaves ~/Dropbox to be found.
+        std::fs::write(root.join(".dropbox/info.json"), format!(r#"{{"personal":{{"path":"{}"}}}}"#, json_path(&root.join("Moved away")))).unwrap();
+        assert_eq!(seen(&find_on(&machine(System::Other, &root)), &root), [(Service::Dropbox, "Dropbox".to_owned(), None)]);
         let _ = std::fs::remove_dir_all(root);
     }
 
