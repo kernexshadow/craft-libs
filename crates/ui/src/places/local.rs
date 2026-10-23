@@ -99,9 +99,11 @@ impl LocalFolder {
         folder
     }
 
-    /// The user's home folder, where This computer usually starts.
+    /// The user's home folder, where This computer usually starts. On Windows `USERPROFILE` comes
+    /// first: `HOME` there is set by tools such as Git Bash or Cygwin, not always to the same folder.
     pub fn home() -> Option<PathBuf> {
-        std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).filter(|home| !home.is_empty()).map(PathBuf::from)
+        let vars = if cfg!(windows) { ["USERPROFILE", "HOME"] } else { ["HOME", "USERPROFILE"] };
+        vars.iter().find_map(|var| std::env::var_os(var).filter(|home| !home.is_empty())).map(PathBuf::from)
     }
 
     /// Shows another folder, keeping the kinds of file.
